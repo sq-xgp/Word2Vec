@@ -20,7 +20,7 @@ EMBEDDING_DIM = 50
 NUM_NEGATIVES = 5
 BATCH_SIZE = 512
 NUM_EPOCHS = 5
-LEARNING_RATE = 0.05
+LEARNING_RATE = 0.01
 RANDOM_SEED = 42
 
 
@@ -53,10 +53,10 @@ def save_checkpoint(
 def create_model_and_optimizer(
     vocab_size: int,
     embedding_dim: int = 50,
-    learning_rate: float = 0.05,
+    learning_rate: float = 0.01,
     device: str | torch.device | None = None,
 ) -> tuple[SkipGramNegSampling, torch.optim.Optimizer, torch.device]:
-    """创建模型和 SGD；未指定设备时优先使用可用的 CUDA。"""
+    """创建模型和 Adam；未指定设备时优先使用可用的 CUDA。"""
     selected_device = torch.device(
         device
         if device is not None
@@ -66,7 +66,7 @@ def create_model_and_optimizer(
         vocab_size=vocab_size,
         embedding_dim=embedding_dim,
     ).to(selected_device)
-    optimizer = torch.optim.SGD(
+    optimizer = torch.optim.Adam(
         model.parameters(),
         lr=learning_rate,
     )
@@ -241,6 +241,7 @@ def run_training(
         "batch_size": batch_size,
         "num_epochs": num_epochs,
         "learning_rate": learning_rate,
+        "optimizer": "Adam",
         "seed": seed,
     }
 

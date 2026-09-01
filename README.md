@@ -236,7 +236,7 @@ Dataset 不再把概率列表、排除集合和 RNG 反复传给旧的 `sample_n
 
 新增 `prepare_data.py`，按“清洗与全语料词频 → min_count=5 → 负采样分布 → threshold=1e-4 降采样 → 逐句 token ID”的顺序准备数据。真实结果为词表 5,208、降采样后 78,893 个 token、每轮动态产生 256,028 个正样本；负采样分布使用降采样前的稳定词频。
 
-`train.py` 已加入正式配置和入口：embedding_dim=50、num_negatives=5、batch_size=512、epochs=5、SGD learning_rate=0.05。训练循环会自动把 batch 移到模型参数所在设备，每轮记录平均 loss 并原子覆盖最新 checkpoint；checkpoint 包含模型、优化器、epoch、word_to_id、配置和 loss 历史。真实语料只完成了 3 个 CPU batch 的冒烟测试，完整 5 轮尚未运行；小型临时语料已验证正式入口和 checkpoint。
+`train.py` 已加入正式配置和入口：embedding_dim=50、num_negatives=5、batch_size=512、epochs=5、Adam learning_rate=0.01。训练循环会自动把 batch 移到模型参数所在设备，每轮记录平均 loss 并原子覆盖最新 checkpoint；checkpoint 包含模型、优化器、epoch、word_to_id、配置和 loss 历史。SGD learning_rate=0.05 的服务器诊断中，5 轮 loss 基本停在初始化基准 4.158883；改用 Adam learning_rate=0.01 后，同一真实语料的本地诊断 loss 在 3 轮中从 3.002734 降至 2.292595，因此正式入口采用 Adam。
 
 `inference.py` 已能用 `weights_only=True` 从 checkpoint 重建模型和双向词表，使用中心词向量的余弦相似度排除查询词自身并返回 top-k，也提供可直接运行的命令行入口。临时 checkpoint 已验证保存前后模型输出完全相同，正式相似词结果等待真实模型训练完成后检查。
 
