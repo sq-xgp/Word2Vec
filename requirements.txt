@@ -1,0 +1,5 @@
+# Planned dependencies; versions and installation will be confirmed later.
+torch
+numpy
+scikit-learn
+matplotlib
