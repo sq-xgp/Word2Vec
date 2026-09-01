@@ -232,11 +232,13 @@ Dataset 不再把概率列表、排除集合和 RNG 反复传给旧的 `sample_n
 
 已完成按句子动态训练的数据管线。`SentencePairDataset` 只保存句子 token ID，每次进入 `__iter__()` 都重新生成正样本；`SentenceWord2VecDataset` 在此基础上即时执行累计概率负采样。初始化时只遍历动态生成器统计正样本数并建立“中心词到不重复正上下文”的集合，不保存 256,028 个 Python 样本元组。
 
-每个 epoch 会打乱 10,000 个句子编号，句子内部词序和窗口关系保持不变。句子顺序 RNG 只在 Dataset 初始化时创建一次，因此同一对象的不同 epoch 顺序不同，而相同配置和种子的新对象可以复现多轮顺序。`DataLoader` 使用 `shuffle=False`、`num_workers=0`，组批形状已在真实语料上验证为 `[B]、[B]、[B, K]`。
+每个 epoch 会打乱句子编号，句子内部词序和窗口关系保持不变。单进程时，句子顺序 RNG 只在 Dataset 初始化时创建一次；多进程时，每个 worker 只遍历按 worker 编号分配给自己的句子，并使用 PyTorch 提供的独立 worker seed 打乱该分片和抽取负样本。因此多 worker 不会重复或漏掉句子，相同 seed 的新 DataLoader 可以复现完整样本序列。`DataLoader` 仍使用 `shuffle=False`，因为句子分片和局部打乱由 Dataset 负责；组批形状为 `[B]、[B]、[B, K]`。
 
 新增 `prepare_data.py`，按“清洗与全语料词频 → min_count=5 → 负采样分布 → threshold=1e-4 降采样 → 逐句 token ID”的顺序准备数据。真实结果为词表 5,208、降采样后 78,893 个 token、每轮动态产生 256,028 个正样本；负采样分布使用降采样前的稳定词频。
 
 `train.py` 已加入正式配置和入口：embedding_dim=50、num_negatives=5、batch_size=512、epochs=5、Adam learning_rate=0.01。训练循环会自动把 batch 移到模型参数所在设备，每轮记录平均 loss 并原子覆盖最新 checkpoint；checkpoint 包含模型、优化器、epoch、word_to_id、配置和 loss 历史。SGD learning_rate=0.05 的服务器诊断中，5 轮 loss 基本停在初始化基准 4.158883；改用 Adam learning_rate=0.01 后，同一真实语料的本地诊断 loss 在 3 轮中从 3.002734 降至 2.292595，因此正式入口采用 Adam。
+
+为扩展到 100K 句语料，`train.py` 和 `SentenceWord2VecDataset` 已支持多个 DataLoader worker。句子先按 worker 编号分片，再在各自分片内打乱；每个 worker 使用独立负采样 RNG。训练循环可按固定 batch 间隔打印近似进度，并使用 pinned memory 与 non-blocking GPU 搬运。两 worker 测试已验证正样本计数和多重集合与单进程完全一致、负样本排除规则保持不变、相同 seed 可复现。服务器单 worker 的 100K 基线为每轮 6,840,310 个正样本、3,340 个 batch、22 分 10 秒，后续用该基线衡量多 worker 加速效果。
 
 `inference.py` 已能用 `weights_only=True` 从 checkpoint 重建模型和双向词表，使用中心词向量的余弦相似度排除查询词自身并返回 top-k，也提供可直接运行的命令行入口。临时 checkpoint 已验证保存前后模型输出完全相同，正式相似词结果等待真实模型训练完成后检查。
 

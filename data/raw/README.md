@@ -11,3 +11,10 @@ The local corpus is Leipzig Corpora Collection `eng_wikipedia_2016_10K`.
 
 The archive and extracted corpus are ignored by Git. Download them from the source instead of
 committing third-party data to the repository.
+
+The larger semantic-quality experiment uses `eng_wikipedia_2016_100K` from the same source.
+
+- Download archive: `eng_wikipedia_2016_100K.tar.gz`
+- Archive SHA-256: `04aa301072a612e0368f1a0abe5f6b011ab03df84961c29b80bd12683a5a6f0`
+- Sentence file: `eng_wikipedia_2016_100K-sentences.txt`
+- Size: 100,000 sentences and 2,121,562 cleaned tokens

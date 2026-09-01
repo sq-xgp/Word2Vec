@@ -5,7 +5,7 @@ import random
 from collections.abc import Iterable, Iterator
 
 import torch
-from torch.utils.data import Dataset, IterableDataset
+from torch.utils.data import Dataset, IterableDataset, get_worker_info
 
 from sampling import CumulativeNegativeSampler
 
@@ -56,6 +56,7 @@ class SentencePairDataset(IterableDataset):
         self.sentence_token_ids = sentences
         self.window_size = window_size
         self.shuffle_sentences = shuffle_sentences
+        self.seed = seed
         self.sentence_rng = random.Random(seed)
         self.num_positive_pairs = sum(
             1
@@ -77,10 +78,22 @@ class SentencePairDataset(IterableDataset):
         )
 
     def _iter_sentence_token_ids(self) -> Iterator[list[int]]:
-        """按本轮顺序逐个返回句子；需要时只打乱句子编号。"""
-        sentence_indices = list(range(len(self.sentence_token_ids)))
-        if self.shuffle_sentences:
-            self.sentence_rng.shuffle(sentence_indices)
+        """逐个返回本 worker 负责的句子，保证多进程不重不漏。"""
+        worker_info = get_worker_info()
+        if worker_info is None:
+            sentence_indices = list(range(len(self.sentence_token_ids)))
+            if self.shuffle_sentences:
+                self.sentence_rng.shuffle(sentence_indices)
+        else:
+            sentence_indices = list(
+                range(
+                    worker_info.id,
+                    len(self.sentence_token_ids),
+                    worker_info.num_workers,
+                )
+            )
+            if self.shuffle_sentences:
+                random.Random(worker_info.seed).shuffle(sentence_indices)
 
         for sentence_index in sentence_indices:
             yield self.sentence_token_ids[sentence_index]
@@ -168,7 +181,16 @@ class SentenceWord2VecDataset(SentencePairDataset):
     def __iter__(
         self,
     ) -> Iterator[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
-        """每轮重新产生正样本，并为每个正样本即时抽取负样本。"""
+        """每轮重新产生正样本，并用当前 worker 的独立 RNG 抽负样本。"""
+        worker_info = get_worker_info()
+        negative_sampler = (
+            self.negative_sampler
+            if worker_info is None
+            else CumulativeNegativeSampler(
+                self.negative_sampling_probs,
+                seed=worker_info.seed,
+            )
+        )
         for center_id, context_id in iter_skipgram_pairs_by_sentence(
             self._iter_sentence_token_ids(),
             window_size=self.window_size,
@@ -177,7 +199,7 @@ class SentenceWord2VecDataset(SentencePairDataset):
                 center_id,
                 *self.center_to_positive_contexts[center_id],
             }
-            negative_ids = self.negative_sampler.sample(
+            negative_ids = negative_sampler.sample(
                 num_negatives=self.num_negatives,
                 excluded_ids=excluded_ids,
             )

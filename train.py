@@ -1,6 +1,7 @@
 """训练：创建训练组件，执行 batch/epoch 更新，并保存 checkpoint。"""
 
 from pathlib import Path
+from time import monotonic
 
 import torch
 from torch.utils.data import DataLoader
@@ -22,6 +23,8 @@ BATCH_SIZE = 512
 NUM_EPOCHS = 5
 LEARNING_RATE = 0.01
 RANDOM_SEED = 42
+NUM_WORKERS = 0
+PROGRESS_EVERY_BATCHES = 100
 
 
 def save_checkpoint(
@@ -80,8 +83,12 @@ def create_training_dataloader(
     num_negatives: int = 5,
     batch_size: int = 512,
     seed: int | None = 42,
+    num_workers: int = 0,
 ) -> tuple[SentenceWord2VecDataset, DataLoader]:
-    """创建按句子动态采样的数据集及单进程 DataLoader。"""
+    """创建按句子动态采样的数据集及可选多进程 DataLoader。"""
+    if type(num_workers) is not int or num_workers < 0:
+        raise ValueError("num_workers 必须是非负整数")
+
     dataset = SentenceWord2VecDataset(
         sentence_token_ids,
         negative_sampling_probs,
@@ -90,12 +97,19 @@ def create_training_dataloader(
         seed=seed,
         shuffle_sentences=True,
     )
+    dataloader_generator = torch.Generator()
+    if seed is not None:
+        dataloader_generator.manual_seed(seed)
+    else:
+        dataloader_generator.seed()
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=0,
+        num_workers=num_workers,
         drop_last=False,
+        pin_memory=torch.cuda.is_available(),
+        generator=dataloader_generator,
     )
     return dataset, dataloader
 
@@ -129,31 +143,59 @@ def train_one_epoch(
     model: SkipGramNegSampling,
     optimizer: torch.optim.Optimizer,
     dataloader: DataLoader,
+    progress_every_batches: int | None = None,
 ) -> float:
     """遍历 DataLoader 一次，返回按实际样本数加权的平均训练损失。
 
     每批复用同一个模型和优化器，并把 DataLoader 产生的张量移动到
     模型参数所在的设备。
-    当前 Dataset 只支持 num_workers=0；保留尾批应设置 drop_last=False。
+    多 worker 时 Dataset 按 worker 编号分片句子并使用独立负采样 RNG。
+    progress_every_batches 指定每隔多少批输出一次近似进度；None 表示不输出。
+    保留尾批应设置 drop_last=False。
     损失统计来自各批更新前的计算，并非用最终参数重新评估的损失。
     如果没有读到任何样本，明确报错，不返回容易误解的零损失。
     """
-    if dataloader.num_workers != 0:
-        raise ValueError("当前 Dataset 尚未支持多个 worker，请设置 num_workers=0")
+    if (
+        progress_every_batches is not None
+        and (
+            type(progress_every_batches) is not int
+            or progress_every_batches < 1
+        )
+    ):
+        raise ValueError("progress_every_batches 必须是正整数或 None")
 
     device = next(model.parameters()).device
     total_loss = 0.0
     total_samples = 0
+    expected_batches = len(dataloader)
+    epoch_start_time = monotonic()
 
-    for centers, contexts, negatives in dataloader:
-        centers = centers.to(device)
-        contexts = contexts.to(device)
-        negatives = negatives.to(device)
+    for batch_index, (centers, contexts, negatives) in enumerate(
+        dataloader,
+        start=1,
+    ):
+        centers = centers.to(device, non_blocking=True)
+        contexts = contexts.to(device, non_blocking=True)
+        negatives = negatives.to(device, non_blocking=True)
 
         loss_value = train_one_batch(model, optimizer, centers, contexts, negatives)
         batch_size = centers.shape[0]              # 使用这一批的实际样本数。
         total_loss += loss_value * batch_size     # 将批平均损失还原为批损失总和。
         total_samples += batch_size
+        if (
+            progress_every_batches is not None
+            and batch_index % progress_every_batches == 0
+        ):
+            elapsed_seconds = monotonic() - epoch_start_time
+            progress_percent = min(
+                100.0,
+                100.0 * batch_index / max(expected_batches, 1),
+            )
+            print(
+                f"  Batch {batch_index} (~{progress_percent:.1f}%) - "
+                f"elapsed {elapsed_seconds:.1f}s",
+                flush=True,
+            )
 
     if total_samples == 0:
         raise ValueError("DataLoader 没有产生训练样本，请检查数据集和 drop_last 设置")
@@ -169,6 +211,7 @@ def train_model(
     checkpoint_path: Path,
     word_to_id: dict[str, int],
     config: dict,
+    progress_every_batches: int | None = None,
 ) -> list[float]:
     """训练指定轮数，并在每轮结束后覆盖保存最新 checkpoint。"""
     if type(num_epochs) is not int or num_epochs < 1:
@@ -176,7 +219,12 @@ def train_model(
 
     loss_history = []
     for epoch in range(1, num_epochs + 1):
-        mean_loss = train_one_epoch(model, optimizer, dataloader)
+        mean_loss = train_one_epoch(
+            model,
+            optimizer,
+            dataloader,
+            progress_every_batches=progress_every_batches,
+        )
         loss_history.append(mean_loss)
         save_checkpoint(
             checkpoint_path,
@@ -205,6 +253,8 @@ def run_training(
     learning_rate: float = LEARNING_RATE,
     seed: int = RANDOM_SEED,
     device: str | torch.device | None = None,
+    num_workers: int = NUM_WORKERS,
+    progress_every_batches: int | None = PROGRESS_EVERY_BATCHES,
 ) -> tuple[SkipGramNegSampling, list[float], torch.device]:
     """准备真实语料并执行完整训练，返回模型、loss 历史和设备。"""
     torch.manual_seed(seed)
@@ -224,6 +274,7 @@ def run_training(
         num_negatives=num_negatives,
         batch_size=batch_size,
         seed=seed,
+        num_workers=num_workers,
     )
     model, optimizer, selected_device = create_model_and_optimizer(
         vocab_size=len(prepared["word_to_id"]),
@@ -243,6 +294,7 @@ def run_training(
         "learning_rate": learning_rate,
         "optimizer": "Adam",
         "seed": seed,
+        "num_workers": num_workers,
     }
 
     print(f"Device: {selected_device}")
@@ -257,6 +309,7 @@ def run_training(
         checkpoint_path=Path(checkpoint_path),
         word_to_id=prepared["word_to_id"],
         config=config,
+        progress_every_batches=progress_every_batches,
     )
     return model, loss_history, selected_device
 
