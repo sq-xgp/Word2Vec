@@ -240,9 +240,11 @@ Dataset 不再把概率列表、排除集合和 RNG 反复传给旧的 `sample_n
 
 为扩展到 100K 句语料，`train.py` 和 `SentenceWord2VecDataset` 已支持多个 DataLoader worker。句子先按 worker 编号分片，再在各自分片内打乱；每个 worker 使用独立负采样 RNG。训练循环可按固定 batch 间隔打印近似进度，并使用 pinned memory 与 non-blocking GPU 搬运。两 worker 测试已验证正样本计数和多重集合与单进程完全一致、负样本排除规则保持不变、相同 seed 可复现。服务器单 worker 的 100K 基线为每轮 6,840,310 个正样本、3,340 个 batch、22 分 10 秒，后续用该基线衡量多 worker 加速效果。
 
-`inference.py` 已能用 `weights_only=True` 从 checkpoint 重建模型和双向词表，使用中心词向量的余弦相似度排除查询词自身并返回 top-k，也提供可直接运行的命令行入口。临时 checkpoint 已验证保存前后模型输出完全相同，正式相似词结果等待真实模型训练完成后检查。
+`inference.py` 已能用 `weights_only=True` 从 checkpoint 重建模型和双向词表，使用中心词向量的余弦相似度排除查询词自身并返回 top-k，也提供可直接运行的命令行入口。100K 句正式模型已经得到清晰结果：`music` 邻近 `pop、dance、musical、albums、musicians`，`city` 邻近 `town、area、park、county、river`，`war` 邻近 `force、military、forces、soviet、navy、campaign、civil、allied`。
 
-`visualize.py` 已实现常见词的 PCA 和 t-SNE 二维降维、带标签散点图保存以及 checkpoint 命令行入口。PCA 用于观察较稳定的整体方向，t-SNE 固定 random_state=42 并侧重局部邻域；二维 t-SNE 全局距离不作精确比例解释。两种方法都已用手工词群完成数值和视觉检查，假数据图片检查后已删除。
+`visualize.py` 已实现 PCA 和 t-SNE 二维降维、带标签散点图保存以及 checkpoint 命令行入口。降维前先对每个词向量做 L2 归一化，使图中的输入与相似词查询使用的余弦方向一致。默认模式绘制最常见的词；重复传入 `--group 标签:word1,word2` 可以选择有意义的语义词并按组着色，避免最高频功能词遮住主题结构。PCA 用于观察整体线性方向，t-SNE 固定训练 seed 并侧重局部邻域；二维 t-SNE 的全局距离不能当作精确比例。分组图用于解释模型结果，不作为独立的量化评估。
+
+100K 句正式实验在 RTX 5090 上使用 8 个 DataLoader worker。配置为词表 14,951、100 维、窗口半径 5、5 个负样本、batch size 2,048、Adam 学习率 0.01，共训练 10 轮。每轮有 6,840,310 个正样本和约 3,340 个 batch；总耗时 34 分 49 秒。平均 loss 从 2.600747 降至 2.229495，checkpoint 为 `checkpoints/word2vec_100K.pt`（约 35 MB）。
 
 ## 当前编辑位置
 
@@ -278,9 +280,9 @@ word2vec/
 
 ## 后续步骤
 
-1. 实现 checkpoint 加载并验证模型参数、词表和配置可以正确恢复。
-2. 在正式执行 5 个 epoch 前联系导师开启 RTX 5090；先在服务器验证 CUDA 和少量 batch，再训练正式语料，把总 GPU 时间控制在 6 小时以内。
-3. 用正式 checkpoint 检查相似词和生成 PCA / t-SNE 图片，再初始化 Git、同步 GitHub并完成服务器部署记录。
+1. 用正式 checkpoint 生成归一化的语义分组 PCA / t-SNE 图，并记录如何解读两种图。
+2. 增加定量评估，例如人工相似词小测试或公开的词相似度数据集，避免只凭几次 top-k 查询判断质量。
+3. 整理实验配置、loss 曲线、相似词和图像，形成可复现的项目报告。
 
 `preprocess.py` 负责正样本构造逻辑，`sampling.py` 负责采样逻辑；数据管线将按上面的顺序衔接，降采样发生在正样本构造之前。
 
