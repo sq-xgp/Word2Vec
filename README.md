@@ -2,6 +2,8 @@
 
 使用 PyTorch 分步实现带负采样的 Skip-gram（SGNS）。
 
+正式100K句实验的配置、训练曲线、相似词和语义分组图见 [`EXPERIMENT_REPORT.md`](EXPERIMENT_REPORT.md)。
+
 ## 当前进度
 
 已完成第 1 步：创建项目目录结构和基础文件。
@@ -269,6 +271,8 @@ word2vec/
 ├── train.py              # 优化器、epoch、训练循环、保存 checkpoint
 ├── inference.py          # 相似词查询
 ├── visualize.py          # PCA / t-SNE 可视化
+├── plot_loss.py           # 从 checkpoint 生成训练 loss 曲线
+├── EXPERIMENT_REPORT.md   # 100K 句正式实验报告
 ├── data/
 │   ├── raw/              # 原始语料
 │   └── processed/        # 处理后的数据与词表
@@ -280,9 +284,8 @@ word2vec/
 
 ## 后续步骤
 
-1. 用正式 checkpoint 生成归一化的语义分组 PCA / t-SNE 图，并记录如何解读两种图。
-2. 增加定量评估，例如人工相似词小测试或公开的词相似度数据集，避免只凭几次 top-k 查询判断质量。
-3. 整理实验配置、loss 曲线、相似词和图像，形成可复现的项目报告。
+1. 增加定量评估，例如人工相似词小测试或公开的词相似度数据集，避免只凭几次 top-k 查询判断质量。
+2. 如需继续扩大语料，先记录新的数据版本和 checksum，再用当前100K句结果作为基线对照。
 
 `preprocess.py` 负责正样本构造逻辑，`sampling.py` 负责采样逻辑；数据管线将按上面的顺序衔接，降采样发生在正样本构造之前。
 
