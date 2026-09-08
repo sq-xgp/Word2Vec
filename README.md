@@ -287,6 +287,41 @@ word2vec/
 1. 增加定量评估，例如人工相似词小测试或公开的词相似度数据集，避免只凭几次 top-k 查询判断质量。
 2. 如需继续扩大语料，先记录新的数据版本和 checksum，再用当前100K句结果作为基线对照。
 
+## 可配置训练与多模型对比
+
+当前开发分支加入了按完整句子划分的验证集和 early stopping。每轮训练后计算
+验证损失；只有验证损失改善时才覆盖对应 checkpoint，连续 `patience` 轮没有改善
+便停止训练。模型文件名默认包含主要超参数，因此不同实验不会写到同一个文件。
+
+下面的两个开关彼此独立：
+
+- `--embedding-mode dual` 使用中心词、上下文两张 embedding table；`shared` 让二者共享一张表。
+- `--score-mode dot` 在训练中使用点积；`cosine` 在训练中使用余弦相似度。
+
+例如训练 200 维的双表点积模型：
+
+```bash
+python train.py --embedding-dim 200 --embedding-mode dual --score-mode dot \
+  --epochs 20 --patience 3 --validation-fraction 0.1 --num-workers 8
+```
+
+训练 100 维的单表余弦模型：
+
+```bash
+python train.py --embedding-dim 100 --embedding-mode shared --score-mode cosine \
+  --epochs 20 --patience 3 --validation-fraction 0.1 --num-workers 8
+```
+
+一次比较多个模型对同一个单词的 top-10 结果：
+
+```bash
+python inference.py music --top-k 10 --similarity cosine --checkpoint \
+  checkpoints/model_a.pt checkpoints/model_b.pt checkpoints/model_c.pt
+```
+
+`--score-mode` 控制训练目标里的分数，`--similarity` 控制推理排序方式。旧 checkpoint
+没有保存这两个新字段时，加载器按原项目的 `dual + dot` 配置兼容读取。
+
 `preprocess.py` 负责正样本构造逻辑，`sampling.py` 负责采样逻辑；数据管线将按上面的顺序衔接，降采样发生在正样本构造之前。
 
 ## 运行当前演示

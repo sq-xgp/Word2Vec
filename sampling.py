@@ -141,75 +141,31 @@ def sample_negatives(
     seed 和 rng 不能同时指定；rng 会推进自身状态，不影响全局随机状态。
     此学习版每次扫描词表，适合小规模数据；大语料阶段再优化。
     """
-    if type(num_negatives) is not int or num_negatives < 1:
-        raise ValueError("num_negatives 必须是正整数")
-    if not negative_sampling_probs:
-        raise ValueError("负采样概率列表不能为空")
-    for probability in negative_sampling_probs:
-        if (
-            not isinstance(probability, (int, float))
-            or isinstance(probability, bool)
-            or not math.isfinite(probability)
-            or probability < 0
-        ):
-            raise ValueError("负采样概率必须是有限的非负数值")
-    if not math.isclose(sum(negative_sampling_probs), 1.0, rel_tol=1e-6, abs_tol=1e-8):
-        raise ValueError("负采样概率总和必须约等于 1")
-
-    excluded = set() if excluded_ids is None else set(excluded_ids)
-    for word_id in excluded:
-        if type(word_id) is not int or not 0 <= word_id < len(negative_sampling_probs):
-            raise ValueError("排除集合中的编号必须是有效的词编号")
-    if seed is not None and type(seed) is not int:
-        raise ValueError("seed 必须是整数或 None")
-    if rng is not None and not isinstance(rng, random.Random):
-        raise ValueError("rng 必须是 random.Random 实例或 None")
     if seed is not None and rng is not None:
         raise ValueError("seed 和 rng 不能同时指定")
-
-    candidate_ids = []
-    candidate_weights = []
-    for word_id, probability in enumerate(negative_sampling_probs):
-        if word_id not in excluded and probability > 0:
-            candidate_ids.append(word_id)
-            candidate_weights.append(probability)
-    if not candidate_ids:
-        raise ValueError("排除后没有概率大于 0 的候选词，无法生成负样本")
-
+    excluded = excluded_ids or set()
+    candidates = [
+        (word_id, probability)
+        for word_id, probability in enumerate(negative_sampling_probs)
+        if word_id not in excluded and probability > 0
+    ]
+    if not candidates:
+        raise ValueError("排除后没有可用负样本")
+    candidate_ids, candidate_weights = zip(*candidates)
     sampler = rng if rng is not None else random.Random(seed)
     return sampler.choices(candidate_ids, weights=candidate_weights, k=num_negatives)
 
 
 class CumulativeNegativeSampler:
-    """预先构建累计概率，之后用二分查找和拒绝采样生成负样本。
-
-    概率检查和累计概率构建只在初始化时执行一次。sample() 抽到排除编号时
-    会重新抽取；如果合法概率太小或连续拒绝次数过多，则扫描一次词表完成
-    剩余抽样，保证极端情况下也能结束。对象内部保存独立 RNG，连续调用会
-    推进随机状态；相同种子和调用顺序可以复现结果。
-    """
+    """按原始词频的 0.75 次方分布抽样，并拒绝正样本词。"""
 
     def __init__(
         self,
         negative_sampling_probs: list[float],
         seed: int | None = None,
     ) -> None:
-        if not negative_sampling_probs:
-            raise ValueError("负采样概率列表不能为空")
-        for probability in negative_sampling_probs:
-            if (
-                not isinstance(probability, (int, float))
-                or isinstance(probability, bool)
-                or not math.isfinite(probability)
-                or probability < 0
-            ):
-                raise ValueError("负采样概率必须是有限的非负数值")
-        if not math.isclose(
-            sum(negative_sampling_probs), 1.0, rel_tol=1e-6, abs_tol=1e-8
-        ):
-            raise ValueError("负采样概率总和必须约等于 1")
-        if seed is not None and type(seed) is not int:
-            raise ValueError("seed 必须是整数或 None")
+        if not negative_sampling_probs or sum(negative_sampling_probs) <= 0:
+            raise ValueError("负采样概率必须包含正概率候选词")
 
         self.negative_sampling_probs = tuple(negative_sampling_probs)
         cumulative_probs = []
@@ -232,62 +188,14 @@ class CumulativeNegativeSampler:
         num_negatives: int = 5,
         excluded_ids: set[int] | None = None,
     ) -> list[int]:
-        """按累计概率有放回抽样，返回不在 excluded_ids 中的编号。"""
-        if type(num_negatives) is not int or num_negatives < 1:
-            raise ValueError("num_negatives 必须是正整数")
-
-        excluded = set() if excluded_ids is None else set(excluded_ids)
-        for word_id in excluded:
-            if type(word_id) is not int or not 0 <= word_id < len(
-                self.negative_sampling_probs
-            ):
-                raise ValueError("排除集合中的编号必须是有效的词编号")
+        """有放回抽取负样本；抽到排除词时直接重抽。"""
+        excluded = excluded_ids or set()
         if self.positive_probability_ids.issubset(excluded):
             raise ValueError("排除后没有概率大于 0 的候选词，无法生成负样本")
-
-        excluded_probability = sum(
-            self.negative_sampling_probs[word_id] for word_id in excluded
-        )
-        acceptance_probability = (
-            self.total_probability - excluded_probability
-        ) / self.total_probability
-
-        # 合法概率过小时直接扫描一次，避免大量拒绝；正常情况走累计概率查找。
-        if acceptance_probability < 0.1:
-            return self._sample_by_filtering(num_negatives, excluded)
-
         negative_ids = []
-        max_attempts = max(100, num_negatives * 20)
-        attempts = 0
-        while len(negative_ids) < num_negatives and attempts < max_attempts:
+        while len(negative_ids) < num_negatives:
             random_value = self.rng.random() * self.total_probability
             word_id = bisect_right(self.cumulative_probs, random_value)
-            if (
-                word_id not in excluded
-                and self.negative_sampling_probs[word_id] > 0
-            ):
+            if word_id not in excluded:
                 negative_ids.append(word_id)
-            attempts += 1
-
-        remaining = num_negatives - len(negative_ids)
-        if remaining > 0:
-            negative_ids.extend(self._sample_by_filtering(remaining, excluded))
         return negative_ids
-
-    def _sample_by_filtering(
-        self,
-        num_negatives: int,
-        excluded_ids: set[int],
-    ) -> list[int]:
-        """扫描词表构建合法候选，用于拒绝采样不合适的极端情况。"""
-        candidate_ids = []
-        candidate_weights = []
-        for word_id, probability in enumerate(self.negative_sampling_probs):
-            if word_id not in excluded_ids and probability > 0:
-                candidate_ids.append(word_id)
-                candidate_weights.append(probability)
-        return self.rng.choices(
-            candidate_ids,
-            weights=candidate_weights,
-            k=num_negatives,
-        )

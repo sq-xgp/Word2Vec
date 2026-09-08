@@ -139,6 +139,7 @@ class SentenceWord2VecDataset(SentencePairDataset):
         num_negatives: int = 5,
         seed: int | None = None,
         shuffle_sentences: bool = True,
+        resample_negatives: bool = True,
     ) -> None:
         super().__init__(
             sentence_token_ids,
@@ -151,6 +152,7 @@ class SentenceWord2VecDataset(SentencePairDataset):
 
         self.negative_sampling_probs = list(negative_sampling_probs)
         self.num_negatives = num_negatives
+        self.resample_negatives = resample_negatives
         self.negative_sampler = CumulativeNegativeSampler(
             self.negative_sampling_probs,
             seed=seed,
@@ -183,14 +185,19 @@ class SentenceWord2VecDataset(SentencePairDataset):
     ) -> Iterator[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
         """每轮重新产生正样本，并用当前 worker 的独立 RNG 抽负样本。"""
         worker_info = get_worker_info()
-        negative_sampler = (
-            self.negative_sampler
-            if worker_info is None
-            else CumulativeNegativeSampler(
-                self.negative_sampling_probs,
-                seed=worker_info.seed,
+        if self.resample_negatives:
+            sampler_seed = None if worker_info is None else worker_info.seed
+            negative_sampler = (
+                self.negative_sampler
+                if sampler_seed is None
+                else CumulativeNegativeSampler(self.negative_sampling_probs, sampler_seed)
             )
-        )
+        else:
+            worker_id = 0 if worker_info is None else worker_info.id
+            sampler_seed = None if self.seed is None else self.seed + worker_id
+            negative_sampler = CumulativeNegativeSampler(
+                self.negative_sampling_probs, sampler_seed
+            )
         for center_id, context_id in iter_skipgram_pairs_by_sentence(
             self._iter_sentence_token_ids(),
             window_size=self.window_size,
