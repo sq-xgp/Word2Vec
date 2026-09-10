@@ -3,6 +3,8 @@
 使用 PyTorch 分步实现带负采样的 Skip-gram（SGNS）。
 
 正式100K句实验的配置、训练曲线、相似词和语义分组图见 [`EXPERIMENT_REPORT.md`](EXPERIMENT_REPORT.md)。
+本次可配置模型版本的修改内容、问题修正过程与四模型对比结果见
+[`MODEL_UPDATE_REPORT.md`](MODEL_UPDATE_REPORT.md)。
 
 ## 当前进度
 
