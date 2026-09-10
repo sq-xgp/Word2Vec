@@ -140,6 +140,7 @@ class SentenceWord2VecDataset(SentencePairDataset):
         seed: int | None = None,
         shuffle_sentences: bool = True,
         resample_negatives: bool = True,
+        center_to_positive_contexts: dict[int, set[int]] | None = None,
     ) -> None:
         super().__init__(
             sentence_token_ids,
@@ -167,11 +168,15 @@ class SentenceWord2VecDataset(SentencePairDataset):
         ):
             raise ValueError("句子中的词编号超出了概率列表对应的词表范围")
 
-        self.center_to_positive_contexts = build_center_to_positive_contexts(
-            iter_skipgram_pairs_by_sentence(
-                self.sentence_token_ids,
-                window_size=self.window_size,
+        self.center_to_positive_contexts = (
+            build_center_to_positive_contexts(
+                iter_skipgram_pairs_by_sentence(
+                    self.sentence_token_ids,
+                    window_size=self.window_size,
+                )
             )
+            if center_to_positive_contexts is None
+            else center_to_positive_contexts
         )
         for center_id, context_ids in self.center_to_positive_contexts.items():
             excluded_ids = {center_id} | context_ids

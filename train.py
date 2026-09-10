@@ -8,7 +8,11 @@ from time import monotonic
 import torch
 from torch.utils.data import DataLoader
 
-from dataset import SentenceWord2VecDataset
+from dataset import (
+    SentenceWord2VecDataset,
+    build_center_to_positive_contexts,
+    iter_skipgram_pairs_by_sentence,
+)
 from model import SkipGramNegSampling
 from prepare_data import prepare_training_data
 
@@ -89,6 +93,7 @@ def create_dataloader(
     seed: int,
     num_workers: int,
     shuffle_sentences: bool,
+    center_to_positive_contexts: dict[int, set[int]] | None = None,
 ) -> tuple[SentenceWord2VecDataset, DataLoader]:
     dataset = SentenceWord2VecDataset(
         sentence_token_ids,
@@ -98,6 +103,7 @@ def create_dataloader(
         seed=seed,
         shuffle_sentences=shuffle_sentences,
         resample_negatives=shuffle_sentences,
+        center_to_positive_contexts=center_to_positive_contexts,
     )
     loader = DataLoader(
         dataset,
@@ -121,7 +127,7 @@ def create_training_dataloader(
     """Backward-compatible training-loader helper used by earlier lessons."""
     return create_dataloader(
         sentence_token_ids, negative_sampling_probs, window_size,
-        num_negatives, batch_size, seed, num_workers, True,
+        num_negatives, batch_size, seed, num_workers, True, None,
     )
 
 
@@ -297,15 +303,22 @@ def run_training(
     train_sentences, validation_sentences = split_sentences(
         prepared["sentence_token_ids"], validation_fraction, seed
     )
+    all_positive_contexts = build_center_to_positive_contexts(
+        iter_skipgram_pairs_by_sentence(
+            prepared["sentence_token_ids"], window_size=window_size
+        )
+    )
     loader_args = (
         prepared["negative_sampling_probs"], window_size, num_negatives,
         batch_size, seed, num_workers,
     )
     train_dataset, train_loader = create_dataloader(
-        train_sentences, *loader_args, shuffle_sentences=True
+        train_sentences, *loader_args, shuffle_sentences=True,
+        center_to_positive_contexts=all_positive_contexts,
     )
     validation_dataset, validation_loader = create_dataloader(
-        validation_sentences, *loader_args, shuffle_sentences=False
+        validation_sentences, *loader_args, shuffle_sentences=False,
+        center_to_positive_contexts=all_positive_contexts,
     )
     model, optimizer, selected_device = create_model_and_optimizer(
         len(prepared["word_to_id"]), embedding_dim, learning_rate,

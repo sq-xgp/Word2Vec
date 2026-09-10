@@ -65,6 +65,17 @@ class ConfigurableWord2VecTests(unittest.TestCase):
         second = [(c.item(), x.item(), n.tolist()) for c, x, n in dataset]
         self.assertEqual(first, second)
 
+    def test_external_positive_contexts_are_never_sampled_as_negatives(self):
+        all_contexts = {0: {1, 2}, 1: {0}, 2: {0}}
+        dataset = SentenceWord2VecDataset(
+            [[0, 1]], [0.25] * 4, window_size=1, num_negatives=20,
+            seed=42, shuffle_sentences=False, resample_negatives=False,
+            center_to_positive_contexts=all_contexts,
+        )
+        samples = list(dataset)
+        negatives_for_zero = samples[0][2].tolist()
+        self.assertFalse({0, 1, 2} & set(negatives_for_zero))
+
 
 if __name__ == "__main__":
     unittest.main()
