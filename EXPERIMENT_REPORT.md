@@ -127,3 +127,57 @@ python plot_loss.py --checkpoint checkpoints/word2vec_100K.pt --output figures/w
 ```bash
 python visualize.py --checkpoint checkpoints/word2vec_100K.pt --output-dir figures/word2vec_100K_grouped --perplexity 5 --group "music:music,pop,dance,musical,albums,musicians,artists,songs,recordings,folk" --group "city:city,town,area,located,park,county,river,street,near,cities" --group "war:war,force,german,military,forces,soviet,navy,campaign,civil,allied"
 ```
+
+## 9. 可配置四模型对比实验
+
+新版本将 embedding table 数量和训练打分方式拆成两个独立开关，因此形成四种组合：
+`dual + dot`、`shared + dot`、`dual + cosine` 和 `shared + cosine`。其中 `dual`
+使用中心词与上下文两张表，`shared` 共享一张表；cosine 模型使用 `temperature=0.1`
+缩放训练 logits。
+
+四组实验都使用100K句语料、100维向量、窗口半径5、5个负样本、batch size
+2,048、学习率0.01、最多20轮，以及按完整句子划分的10%验证集。Early stopping
+设置为 `patience=3`、`min_delta=0.001`。训练集与验证集共享全语料的正上下文排除表，
+验证负样本固定不变，避免把训练集中的已知正上下文当成验证负样本，也避免每轮验证目标变化。
+
+| Embedding | 训练打分 | Temperature | 最佳 epoch | 最佳验证 loss | 训练停止点 |
+|---|---|---:|---:|---:|---:|
+| dual | dot | 不适用 | 1 | 2.458485 | 4（early stop） |
+| shared | dot | 不适用 | 6 | 3.739783 | 9（early stop） |
+| dual | cosine | 0.1 | 20 | 2.250856 | 20 |
+| shared | cosine | 0.1 | 20 | 3.799480 | 20 |
+
+这些验证 loss 来自不同参数化和不同 logit 计算方式，数值尺度并不完全等价，不能只按
+loss 大小给四个模型排序。它们主要用于各自训练过程中的 checkpoint 选择和 early stopping。
+
+推理阶段统一使用中心词向量之间的余弦相似度，并对 `music`、`city`、`war` 进行
+top-10 人工检查。结果概括如下：
+
+| 模型 | 人工观察 |
+|---|---|
+| dual + dot | 三个查询都能返回合理结果，但近邻相对分散 |
+| shared + dot | `war` 的结果较好，`music` 和 `city` 中出现较多宽泛关联词 |
+| dual + cosine, T=0.1 | 三个查询的语义最集中，整体表现最好 |
+| shared + cosine, T=0.1 | 整体接近 dual cosine，参数更少，但偶尔出现噪声词 |
+
+例如，`dual + cosine, T=0.1` 为 `music` 返回 `pop、folk、songs、dance、musical、
+jazz、guitar、albums、musicians、song`；为 `city` 返回 `town、county、downtown、
+area、park、district、tourist、located、san、centre`；为 `war` 返回 `army、civil、
+military、campaign、wars、soviet、vietnam、troops、france、allies`。
+
+实验中还训练过未缩放的 cosine 模型（`temperature=1`）。该模型对无关词也产生接近
+0.9998 的余弦相似度，说明向量方向发生坍塌。加入 `temperature=0.1` 后，相似度恢复到
+有区分度的范围，近邻语义也明显改善，因此未缩放模型不计入正式四模型比较。
+
+以上排名属于三个查询词上的定性检查，不能替代独立定量评估。后续应使用 WordSim353、
+SimLex-999 或词类比数据集报告相关系数或准确率，再判断配置是否能稳定推广到其他词。
+
+一次联合复现四模型查询的命令为：
+
+```bash
+python inference.py music --top-k 10 --similarity cosine --checkpoint \
+  checkpoints/w2v_dual_dot_d100_w5_n5_bs2048_lr0.01_mc10_ss1em04_e20_vf0.1_p3_seed42.pt \
+  checkpoints/w2v_shared_dot_d100_w5_n5_bs2048_lr0.01_mc10_ss1em04_e20_vf0.1_p3_seed42.pt \
+  checkpoints/w2v_dual_cosine_t0.1_d100_w5_n5_bs2048_lr0.01_mc10_ss1em04_e20_vf0.1_p3_seed42.pt \
+  checkpoints/w2v_shared_cosine_t0.1_d100_w5_n5_bs2048_lr0.01_mc10_ss1em04_e20_vf0.1_p3_seed42.pt
+```
