@@ -23,8 +23,11 @@ SENTENCE_FILE = Path("data/raw/eng_wikipedia_2016_10K-sentences.txt")
 def model_name(config: dict) -> str:
     """Build a readable, collision-resistant name from important hyperparameters."""
     threshold = f"{config['subsampling_threshold']:.0e}".replace("-", "m")
+    score_name = config["score_mode"]
+    if score_name == "cosine":
+        score_name += f"_t{config['temperature']:g}"
     return (
-        f"w2v_{config['embedding_mode']}_{config['score_mode']}_"
+        f"w2v_{config['embedding_mode']}_{score_name}_"
         f"d{config['embedding_dim']}_w{config['window_size']}_"
         f"n{config['num_negatives']}_bs{config['batch_size']}_"
         f"lr{config['learning_rate']:g}_mc{config['min_count']}_ss{threshold}_"
@@ -70,6 +73,7 @@ def create_model_and_optimizer(
     learning_rate: float = 0.01,
     embedding_mode: str = "dual",
     score_mode: str = "dot",
+    temperature: float = 0.1,
     device: str | torch.device | None = None,
 ) -> tuple[SkipGramNegSampling, torch.optim.Optimizer, torch.device]:
     selected_device = torch.device(
@@ -80,6 +84,7 @@ def create_model_and_optimizer(
         embedding_dim,
         embedding_mode=embedding_mode,
         score_mode=score_mode,
+        temperature=temperature,
     ).to(selected_device)
     return model, torch.optim.Adam(model.parameters(), lr=learning_rate), selected_device
 
@@ -281,6 +286,7 @@ def run_training(
     embedding_dim: int = 100,
     embedding_mode: str = "dual",
     score_mode: str = "dot",
+    temperature: float = 0.1,
     num_negatives: int = 5,
     batch_size: int = 2048,
     num_epochs: int = 10,
@@ -322,13 +328,14 @@ def run_training(
     )
     model, optimizer, selected_device = create_model_and_optimizer(
         len(prepared["word_to_id"]), embedding_dim, learning_rate,
-        embedding_mode, score_mode, device,
+        embedding_mode, score_mode, temperature, device,
     )
     config = {
         "vocab_size": len(prepared["word_to_id"]),
         "embedding_dim": embedding_dim,
         "embedding_mode": embedding_mode,
         "score_mode": score_mode,
+        "temperature": temperature,
         "min_count": min_count,
         "subsampling_threshold": subsampling_threshold,
         "window_size": window_size,
@@ -364,6 +371,7 @@ def main() -> None:
     parser.add_argument("--embedding-dim", type=int, default=100)
     parser.add_argument("--embedding-mode", choices=("dual", "shared"), default="dual")
     parser.add_argument("--score-mode", choices=("dot", "cosine"), default="dot")
+    parser.add_argument("--temperature", type=float, default=0.1)
     parser.add_argument("--num-negatives", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=2048)
     parser.add_argument("--epochs", type=int, default=10)
@@ -384,6 +392,7 @@ def main() -> None:
         embedding_dim=args.embedding_dim,
         embedding_mode=args.embedding_mode,
         score_mode=args.score_mode,
+        temperature=args.temperature,
         num_negatives=args.num_negatives,
         batch_size=args.batch_size,
         num_epochs=args.epochs,

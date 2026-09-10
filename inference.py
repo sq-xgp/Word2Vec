@@ -26,6 +26,7 @@ def load_trained_model(
         config["embedding_dim"],
         embedding_mode=config.get("embedding_mode", "dual"),
         score_mode=config.get("score_mode", "dot"),
+        temperature=config.get("temperature", 1.0),
     ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()

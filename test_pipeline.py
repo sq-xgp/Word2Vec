@@ -28,6 +28,13 @@ class ConfigurableWord2VecTests(unittest.TestCase):
                 if embedding_mode == "shared":
                     self.assertIs(model.center_embeddings, model.context_embeddings)
 
+    def test_cosine_temperature_scales_logits(self):
+        left = torch.tensor([[1.0, 0.0]])
+        right = torch.tensor([[0.5, 0.5]])
+        unscaled = SkipGramNegSampling(2, 2, score_mode="cosine", temperature=1.0)
+        scaled = SkipGramNegSampling(2, 2, score_mode="cosine", temperature=0.1)
+        self.assertTrue(torch.allclose(scaled._score(left, right), 10 * unscaled._score(left, right)))
+
     def test_sentence_split_is_reproducible_and_disjoint(self):
         sentences = [[index] for index in range(20)]
         first = split_sentences(sentences, 0.2, 42)
@@ -45,6 +52,7 @@ class ConfigurableWord2VecTests(unittest.TestCase):
             "embedding_dim": 6,
             "embedding_mode": "shared",
             "score_mode": "cosine",
+            "temperature": 0.1,
         }
         words = {"red": 0, "blue": 1, "green": 2, "black": 3}
         with tempfile.TemporaryDirectory() as directory:

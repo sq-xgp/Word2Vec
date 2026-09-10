@@ -297,6 +297,7 @@ word2vec/
 
 - `--embedding-mode dual` 使用中心词、上下文两张 embedding table；`shared` 让二者共享一张表。
 - `--score-mode dot` 在训练中使用点积；`cosine` 在训练中使用余弦相似度。
+- 余弦训练通过 `--temperature` 缩放 logits，默认 `0.1`；点积训练忽略该参数。
 
 例如训练 200 维的双表点积模型：
 
@@ -309,7 +310,7 @@ python train.py --embedding-dim 200 --embedding-mode dual --score-mode dot \
 
 ```bash
 python train.py --embedding-dim 100 --embedding-mode shared --score-mode cosine \
-  --epochs 20 --patience 3 --validation-fraction 0.1 --num-workers 8
+  --temperature 0.1 --epochs 20 --patience 3 --validation-fraction 0.1 --num-workers 8
 ```
 
 一次比较多个模型对同一个单词的 top-10 结果：

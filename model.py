@@ -14,6 +14,7 @@ class SkipGramNegSampling(nn.Module):
         embedding_dim: int = 128,
         embedding_mode: str = "dual",
         score_mode: str = "dot",
+        temperature: float = 0.1,
     ) -> None:
         super().__init__()
         if vocab_size < 1 or embedding_dim < 1:
@@ -22,11 +23,14 @@ class SkipGramNegSampling(nn.Module):
             raise ValueError("embedding_mode 必须是 'dual' 或 'shared'")
         if score_mode not in {"dot", "cosine"}:
             raise ValueError("score_mode 必须是 'dot' 或 'cosine'")
+        if temperature <= 0:
+            raise ValueError("temperature 必须大于 0")
 
         self.vocab_size = vocab_size
         self.embedding_dim = embedding_dim
         self.embedding_mode = embedding_mode
         self.score_mode = score_mode
+        self.temperature = temperature
         self.center_embeddings = nn.Embedding(vocab_size, embedding_dim)
         self.context_embeddings = (
             nn.Embedding(vocab_size, embedding_dim)
@@ -41,7 +45,7 @@ class SkipGramNegSampling(nn.Module):
 
     def _score(self, left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
         if self.score_mode == "cosine":
-            return F.cosine_similarity(left, right, dim=-1)
+            return F.cosine_similarity(left, right, dim=-1) / self.temperature
         return (left * right).sum(dim=-1)
 
     def forward(
