@@ -1,0 +1,14 @@
+{
+  "provenance": "Manually transcribed from user-provided server output screenshots on 2026-09-29; not a raw log.",
+  "run": "20260929_170321_581954",
+  "test_words": 1496,
+  "k": 10,
+  "autoencoder": {
+    "test_mse": 0.007460610941052437,
+    "neighbor_retention": 0.010227273218333721
+  },
+  "pca": {
+    "test_mse": 0.0077693769708275795,
+    "neighbor_retention": 0.005815508309751749
+  }
+}

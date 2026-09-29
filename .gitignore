@@ -16,6 +16,7 @@ venv/
 !/data/raw/.gitkeep
 !/data/raw/README.md
 /data/processed/*
+/data/autoencoder/
 !/data/processed/.gitkeep
 /checkpoints/*
 !/checkpoints/.gitkeep
@@ -24,4 +25,5 @@ venv/
 
 # Operating system files
 .DS_Store
+.idea/
 Thumbs.db

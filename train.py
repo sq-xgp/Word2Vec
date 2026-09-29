@@ -167,9 +167,9 @@ def run_epoch(
 
     with torch.set_grad_enabled(training):
         for batch_index, (centers, contexts, negatives) in enumerate(dataloader, 1):
-            centers = centers.to(device, non_blocking=True)
-            contexts = contexts.to(device, non_blocking=True)
-            negatives = negatives.to(device, non_blocking=True)
+            centers = centers.to(device, non_blocking=True)        #[B]
+            contexts = contexts.to(device, non_blocking=True)      # [B]
+            negatives = negatives.to(device, non_blocking=True)    # [B,K]
             if training:
                 optimizer.zero_grad()
             positive_scores, negative_scores = model(centers, contexts, negatives)
